@@ -2,7 +2,7 @@ import math
 
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-import matplotlib_fontja
+import matplotlib_fontja  # noqa: F401
 import numpy as np
 
 # ==========================================
@@ -15,38 +15,96 @@ NUM_SENSORS = 6  # センサーの数
 DT = 0.1  # 1ループの進む時間（タイムステップ）
 
 # 制御ゲイン
-KP_TRANS = 0.5  # ライン中心への引き戻し力（Pゲイン）
+KP_TRANS = 0.2  # ライン中心への引き戻し力（Pゲイン）
+KD_HEADING = 0.3  # ベクトル微分のゲイン（急カーブへの反応力）
 
 # 状態保持・復帰用パラメータ
 MAX_LOST_STEPS = (
     200  # ラインを見失った後、推測で進み続ける最大ステップ数 (30 * 0.1秒 = 3秒)
 )
 
-COURSE_TYPE = 3  # (1: 直線, 2: S字カーブ, 3: 円形コース, 4 : 直角)
+COURSE_TYPE = (
+    6  # (1: 直線, 2: S字カーブ, 3: 円形コース, 4 : 直角, 5 : 正方形, 6 : final)
+)
 
 
 # ==========================================
 # 2. コース（ライン）の生成関数
 # ==========================================
+
+
 def generate_course(type_id):
     points = []
     if type_id == 1:
-        for y in range(0, 1000, 5):
+        # 直線
+        for y in range(0, 2000, 5):
             points.append([y * 0.2, y])
     elif type_id == 2:
-        for y in range(0, 1000, 5):
-            x = 100 * math.sin(y / 100.0)
-            points.append([x, y])
+        # S字カーブ (振幅と周期を拡大)
+        for y in range(0, 2000, 5):
+            points.append([200 * math.sin(y / 200.0), y])
     elif type_id == 3:
+        # 円形コース (半径を300に拡大)
         for theta in np.linspace(0, 2 * math.pi, 200):
-            points.append([200 * math.cos(theta), 200 * math.sin(theta) + 200])
+            points.append([300 * math.cos(theta), 300 * math.sin(theta) + 300])
     elif type_id == 4:
-        # 直角コース（クランク）
-        # まずY方向に進み、(0, 500)で直角に右に曲がる
-        for y in range(0, 500, 5):
+        # 直角（クランク）- 大型化
+        for y in range(0, 800, 5):
             points.append([0, y])
-        for x in range(5, 500, 5):  # 5から始めて角の点の重複を防ぐ
-            points.append([x, 500])
+        for x in range(5, 800, 5):
+            points.append([x, 800])
+    elif type_id == 5:
+        # 正方形 (一辺800に拡大)
+        for y in range(0, 800, 5):
+            points.append([0, y])
+        for x in range(5, 800, 5):
+            points.append([x, 800])
+        for y in range(795, -1, -5):
+            points.append([800, y])
+        for x in range(795, -1, -5):
+            points.append([x, 0])
+    elif type_id == 6:
+        # 【ボスステージ 改】 機体サイズ(半径8cm)に合わせた超特大コース
+
+        # ① 直線 (スタート 〜 Y=300)
+        for y in range(0, 300, 5):
+            points.append([0, y])
+
+        # ② 斜め (Y=300 〜 600)
+        for y in range(300, 600, 5):
+            x = (y - 300) * (200.0 / 300.0)  # Xは0から200へ
+            points.append([x, y])
+
+        # ③ 特大ギザギザ (Y方向の間隔を常に200mm以上確保)
+        # 右(200)から左(-100)へ (Y: 600 -> 800)
+        for y in range(600, 800, 5):
+            x = 200 - (y - 600) * (300.0 / 200.0)
+            points.append([x, y])
+
+        # 左(-100)から右(300)へ (Y: 800 -> 1000)
+        for y in range(800, 1000, 5):
+            x = -100 + (y - 800) * (400.0 / 200.0)
+            points.append([x, y])
+
+        # 右(300)から中央(100)へ (Y: 1000 -> 1200)
+        for y in range(1000, 1200, 5):
+            x = 300 - (y - 1000) * (200.0 / 200.0)
+            points.append([x, y])
+
+        # ④ 特大U字カーブ (右回り)
+        # 中心(400, 1200)、半径300(直径600)。開始(100) -> 終了(700)
+        # 往路と復路の間隔が600mm空くので絶対に干渉しない
+        for theta in np.linspace(math.pi, 0, 100):
+            if theta == math.pi:
+                continue
+            points.append([400 + 300 * math.cos(theta), 1200 + 300 * math.sin(theta)])
+
+        # ⑤ 特大S字カーブ (帰路)
+        # 往路(X=300付近)に干渉しないよう、X=700をベースにうねりながら降りてくる
+        for y in range(1200, -200, -5):
+            x = 700 + 150 * math.sin((1200 - y) / 120.0)
+            points.append([x, y])
+
     return np.array(points)
 
 
@@ -57,12 +115,12 @@ def main():
     path = generate_course(COURSE_TYPE)
 
     robot_pos = np.array([path[0][0], path[0][1]])
-    robot_theta = 0.0
 
     # 状態保持用の変数
     current_heading = np.array([0.0, 1.0])
     last_valid_heading = np.array([0.0, 1.0])  # 最後に記憶した確かな進行方向
     lost_counter = 0  # 見失っている時間をカウント
+    previous_line_vector = np.array([0.0, 1.0])  # 直前の前方
 
     sensor_angles = np.linspace(0, 2 * np.pi, NUM_SENSORS, endpoint=False)
     sensor_local_pos = np.array(
@@ -143,23 +201,34 @@ def main():
                 f_mean = np.mean(front_sensors, axis=0)
                 # 機体中心から前センサーへのベクトルを「これから行くべき道」とみなす
                 line_vector = f_mean - robot_pos
-                blend_weight = 0.1  # あくまで予測なので少し弱めにブレンドする
+                blend_weight = 0.2  # あくまで予測なので少し弱めにブレンドする
 
             elif len(back_sensors) > 0:
                 # 状態C：後ろだけ反応（過去の軌跡から直線を推測する）
                 b_mean = np.mean(back_sensors, axis=0)
                 # 後ろセンサーから機体中心へのベクトルを「いままで来た道」とみなす
                 line_vector = robot_pos - b_mean
-                blend_weight = 0.05  # 不確実性が高いのでさらに弱め
+                blend_weight = 0.07  # 不確実性が高いのでさらに弱め
 
             # ベクトルの正規化（長さを1にする）と、現在方向への合成
             if blend_weight > 0:
                 line_vector = line_vector / np.linalg.norm(line_vector)
-                # 現在の向きに、新しい推測ベクトルを滑らかに足し合わせる
+
+                # ① ラインベクトルの変化量（微分）を計算
+                # 直線ならほぼ[0, 0]、直角が来ると巨大なベクトルになる
+                diff_vector = line_vector - previous_line_vector
+
+                # ② 現在の向きに、予測(P)と変化の勢い(D)を足し合わせる
                 current_heading = (
-                    1.0 - blend_weight
-                ) * current_heading + blend_weight * line_vector
+                    (1.0 - blend_weight) * current_heading
+                    + blend_weight * line_vector
+                    + KD_HEADING * diff_vector
+                )
+
                 current_heading = current_heading / np.linalg.norm(current_heading)
+
+                # ③ 次回の微分計算のために、今回のラインベクトルを記憶
+                previous_line_vector = line_vector.copy()
 
             # ③ ズレ（エラー）の計算と「直交射影」
             line_center = np.mean(active_sensors, axis=0)
