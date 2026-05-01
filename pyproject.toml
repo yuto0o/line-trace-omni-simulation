@@ -8,4 +8,5 @@ dependencies = [
     "matplotlib>=3.10.9",
     "matplotlib-fontja>=1.1.0",
     "numpy>=2.4.4",
+    "optuna>=4.8.0",
 ]
