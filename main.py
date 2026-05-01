@@ -8,16 +8,30 @@ import numpy as np
 # ==========================================
 # 1. パラメータ設定
 # ==========================================
-DISK_RADIUS = 80.0  # 円盤（機体）の半径 [mm]
+DISK_RADIUS = 40.0  # 円盤（機体）の半径 [mm]
 LINE_WIDTH = 20.0  # ラインの太さ [mm]
 BASE_SPEED = 40.0  # ロボットの基本進行速度
 NUM_SENSORS = 6  # センサーの数
 DT = 0.1  # 1ループの進む時間（タイムステップ）
 
 # 制御ゲイン
-KP_TRANS = 0.2  # ライン中心への引き戻し力（Pゲイン）
-KD_HEADING = 0.3  # ベクトル微分のゲイン（急カーブへの反応力）
+KP_TRANS = 0.3480  # ライン中心への引き戻し力（Pゲイン）
+KD_HEADING = 0.5077  # ベクトル微分のゲイン（急カーブへの反応力）
 
+
+# 40
+#  KP_TRANS = 0.3480
+#   KD_HEADING = 0.5077
+#   BLEND_BOTH = 0.6549
+#   BLEND_FRONT = 0.1272
+#   BLEND_BACK = 0.0165
+
+# 80
+#  KP_TRANS = 0.2752
+#   KD_HEADING = 0.3706
+#   BLEND_BOTH = 0.7636
+#   BLEND_FRONT = 0.3897
+#   BLEND_BACK = 0.1041
 # 状態保持・復帰用パラメータ
 MAX_LOST_STEPS = (
     200  # ラインを見失った後、推測で進み続ける最大ステップ数 (30 * 0.1秒 = 3秒)
@@ -130,7 +144,7 @@ def main():
     plt.ion()
     fig, ax = plt.subplots(figsize=(6, 8))
 
-    for step in range(1000):
+    for step in range(3000):
         ax.cla()
         ax.set_aspect("equal")
 
@@ -194,21 +208,29 @@ def main():
                 f_mean = np.mean(front_sensors, axis=0)
                 b_mean = np.mean(back_sensors, axis=0)
                 line_vector = f_mean - b_mean
-                blend_weight = 0.3  # 強めに今の向きを更新する
-
+                blend_weight = 0.6549  # 強めに今の向きを更新する
+            #   BLEND_BOTH = 0.7636
+            #   BLEND_FRONT = 0.3897
+            #   BLEND_BACK = 0.1041
             elif len(front_sensors) > 0:
                 # 状態B：前だけ反応（未来のカーブを予測する Pure Pursuit）
                 f_mean = np.mean(front_sensors, axis=0)
                 # 機体中心から前センサーへのベクトルを「これから行くべき道」とみなす
                 line_vector = f_mean - robot_pos
-                blend_weight = 0.2  # あくまで予測なので少し弱めにブレンドする
+                blend_weight = 0.1272  # あくまで予測なので少し弱めにブレンドする
+                # 40
+            #  KP_TRANS = 0.3480
+            #   KD_HEADING = 0.5077
+            #   BLEND_BOTH = 0.6549
+            #   BLEND_FRONT = 0.1272
+            #   BLEND_BACK = 0.0165
 
             elif len(back_sensors) > 0:
                 # 状態C：後ろだけ反応（過去の軌跡から直線を推測する）
                 b_mean = np.mean(back_sensors, axis=0)
                 # 後ろセンサーから機体中心へのベクトルを「いままで来た道」とみなす
                 line_vector = robot_pos - b_mean
-                blend_weight = 0.07  # 不確実性が高いのでさらに弱め
+                blend_weight = 0.0161  # 不確実性が高いのでさらに弱め
 
             # ベクトルの正規化（長さを1にする）と、現在方向への合成
             if blend_weight > 0:
