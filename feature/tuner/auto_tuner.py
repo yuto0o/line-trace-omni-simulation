@@ -17,7 +17,7 @@ SPIN_OMEGA = 1.0
 HEADING_BLEND = 0.249
 LOST_THRESHOLD_STEPS = int((math.pi / 2.0) / (SPIN_OMEGA * DT))
 FORCE_LEFT_SPEED = math.radians(60.0)
-I_THRESHOLD = LINE_WIDTH
+I_THRESHOLD = LINE_WIDTH * 0
 
 
 # ==========================================

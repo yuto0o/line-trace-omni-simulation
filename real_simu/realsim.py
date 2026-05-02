@@ -7,12 +7,12 @@ import numpy as np
 # ==========================================
 # 1. パラメータ設定
 # ==========================================
-DISK_RADIUS = 80.0
+DISK_RADIUS = 100.0
 LINE_WIDTH = 20.0
 # BASE_SPEED = 50.0  # スピードはそのまま、追従性を確認
 MAX_SPEED = 100.0  # 直線時の最高速
 MIN_SPEED = 40.0  # カーブ時の安全な最低速
-SPEED_DECAY = 0.5  # ズレに対する減速の強さ（係数）
+SPEED_DECAY = 0.7  # ズレに対する減速の強さ（係数）
 NUM_SENSORS = 6
 DT = 0.1
 
@@ -22,8 +22,8 @@ SPIN_OMEGA = 1.0
 # PID制御・ハイブリッド制御用のゲイン
 KP = 0.7
 KD = 0.0
-KI = 0.4
-I_THRESHOLD = LINE_WIDTH  # [NEW] 積分を開始する閾値（ラインの太さと同じ）
+KI = 0.12
+I_THRESHOLD = LINE_WIDTH * 0  # [NEW] 積分を開始する閾値（ラインの太さと同じ）
 
 HEADING_BLEND = 0.249
 LOST_THRESHOLD_STEPS = int((math.pi / 2.0) / (SPIN_OMEGA * DT))
