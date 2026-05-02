@@ -9,21 +9,27 @@ import numpy as np
 # ==========================================
 DISK_RADIUS = 80.0
 LINE_WIDTH = 20.0
-BASE_SPEED = 40.0
+BASE_SPEED = 60.0
 NUM_SENSORS = 6
 DT = 0.1
 
-COURSE_TYPE = 6
-SPIN_OMEGA = 1  # 機体の自転角速度 (rad/s)
+COURSE_TYPE = 5
+SPIN_OMEGA = 1.0  # 機体の自転角速度 (rad/s)
 
-# [NEW] PD制御用のゲイン
-KP = 0.6  # P(比例)ゲイン: ズレに比例して引き戻す力
-KD = 0.1  # D(微分)ゲイン: ズレの変化(勢い)を抑える、または予測してブレーキをかける力
-HEADING_BLEND = 0.249  # 前後の点から求めた進行方向を、現在の進行方向に混ぜる割合
+# PD制御用のゲイン
+KP = 0.6
+KD = 0.1
+HEADING_BLEND = 0.249
+
+# [NEW] 左急カーブ対策用のパラメータ
+# 90度回転するのにかかるステップ数
+LOST_THRESHOLD_STEPS = int((math.pi / 2.0) / (SPIN_OMEGA * DT))
+# 強制的に左に曲げる角速度 (rad/s)
+FORCE_LEFT_SPEED = math.radians(60.0)
 
 
 # ==========================================
-# 2. コース（ライン）の生成関数
+# 2. コース生成
 # ==========================================
 def generate_course(type_id):
     points = []
@@ -45,6 +51,16 @@ def generate_course(type_id):
                 )
         for y in range(1200, -200, -5):
             points.append([700 + 150 * math.sin((1200 - y) / 120.0), y])
+    elif type_id == 5:
+        # 正方形 (一辺800に拡大)
+        for y in range(0, 800, 5):
+            points.append([0, y])
+        for x in range(5, 800, 5):
+            points.append([x, 800])
+        for y in range(795, -1, -5):
+            points.append([800, y])
+        for x in range(795, -1, -5):
+            points.append([x, 0])
     return np.array(points)
 
 
@@ -55,15 +71,15 @@ def main():
     path = generate_course(COURSE_TYPE)
     robot_pos = np.array([path[0][0], path[0][1]])
 
-    current_heading = np.array([0.0, 1.0])
+    current_heading = np.array([1.0, 0.0])
+    target_heading = np.array([1.0, 0.0])  # ベクトル凍結用に保持
     robot_theta = 0.0
 
-    # 前後の記憶ポイント
     latest_front_pos = robot_pos + current_heading * DISK_RADIUS
     latest_back_pos = robot_pos - current_heading * DISK_RADIUS
 
-    # D制御のための過去エラー値
     prev_err_val = 0.0
+    front_lost_steps = 0  # [NEW] 前の点を見失っているステップ数
 
     sensor_angles = np.linspace(0, 2 * np.pi, NUM_SENSORS, endpoint=False)
 
@@ -82,7 +98,6 @@ def main():
             alpha=0.5,
         )
 
-        # 常に自転
         robot_theta += SPIN_OMEGA * DT
 
         # センサー座標計算
@@ -101,6 +116,8 @@ def main():
 
         # センサー判定と前後点の更新
         active_sensors = []
+        front_updated = False  # [NEW] 今のステップで前方が更新されたかフラグ
+
         for s_pos in sensor_global_pos:
             distances = np.linalg.norm(path - s_pos, axis=1)
             if np.min(distances) < (LINE_WIDTH / 2.0):
@@ -110,6 +127,7 @@ def main():
                 local_vec = s_pos - robot_pos
                 if np.dot(local_vec, current_heading) > 0:
                     latest_front_pos = s_pos.copy()
+                    front_updated = True
                 else:
                     latest_back_pos = s_pos.copy()
             else:
@@ -118,42 +136,68 @@ def main():
         ax.plot(latest_front_pos[0], latest_front_pos[1], "y*", markersize=10)
         ax.plot(latest_back_pos[0], latest_back_pos[1], "y*", markersize=10)
 
+        # [NEW] フロントロストのカウント
+        if front_updated:
+            front_lost_steps = 0
+        else:
+            front_lost_steps += 1
         # ------------------------------------------------
-        # 1. 進行方向の更新 (前後のポイントを結ぶベクトル)
+        # 1. 進行方向の更新 (凍結 ＆ 強制左旋回ロジック)
         # ------------------------------------------------
-        target_heading = latest_front_pos - latest_back_pos
-        if np.linalg.norm(target_heading) > 1e-3:
-            target_heading = target_heading / np.linalg.norm(target_heading)
+        if front_lost_steps == 0:
+            # 正常時：前方が更新された時だけ目標ベクトル(target_heading)を新しく作り直す
+            raw_heading = latest_front_pos - latest_back_pos
+            if np.linalg.norm(raw_heading) > 1e-3:
+                target_heading = raw_heading / np.linalg.norm(raw_heading)
+
+        # 異常時：90度分見失ったら強制左旋回
+        if front_lost_steps >= LOST_THRESHOLD_STEPS:
+            rot_angle = FORCE_LEFT_SPEED * DT
+            cos_a = math.cos(rot_angle)
+            sin_a = math.sin(rot_angle)
+
+            new_x = current_heading[0] * cos_a - current_heading[1] * sin_a
+            new_y = current_heading[0] * sin_a + current_heading[1] * cos_a
+
+            current_heading = np.array([new_x, new_y])
+            current_heading = current_heading / np.linalg.norm(current_heading)
+
+            ax.text(
+                robot_pos[0] - 50,
+                robot_pos[1] + 100,
+                "FORCE LEFT!",
+                color="red",
+                fontsize=12,
+                fontweight="bold",
+            )
+
+        else:
+            # 【修正ポイント】強制旋回中でなければ、毎ステップ必ずブレンド処理を行う！
+            # （フロントを見失っている間は、凍結された古いtarget_headingが使われる）
             current_heading = (
                 1.0 - HEADING_BLEND
             ) * current_heading + HEADING_BLEND * target_heading
             current_heading = current_heading / np.linalg.norm(current_heading)
-
         # ------------------------------------------------
         # 2. 横ズレに対するPD制御 (疑似ステアリング)
         # ------------------------------------------------
         err_val = 0.0
-        # 進行方向に対して左向きを正とする横ベクトル
         lateral_dir = np.array([-current_heading[1], current_heading[0]])
 
         if len(active_sensors) > 0:
             line_center = np.mean(active_sensors, axis=0)
             raw_err_vec = line_center - robot_pos
-            # 中心からどれだけ横にズレているか（スカラー量）
             err_val = np.dot(raw_err_vec, lateral_dir)
 
-        # D制御: エラーの変化量
         d_err_val = (err_val - prev_err_val) / DT
         prev_err_val = err_val
 
-        # PD制御の出力を計算
         correction_speed = (KP * err_val) + (KD * d_err_val)
 
-        # ベースの直進速度と、PD制御による横スライド速度を合成
         velocity_forward = current_heading * BASE_SPEED
         velocity_lateral = lateral_dir * correction_speed
-
         velocity = velocity_forward + velocity_lateral
+
         robot_pos = robot_pos + velocity * DT
 
         # ------------------------------------------------
@@ -170,7 +214,6 @@ def main():
             [robot_pos[0], front_x], [robot_pos[1], front_y], color="blue", linewidth=1
         )
 
-        # 進行方向ベクトル (オレンジ)
         ax.arrow(
             robot_pos[0],
             robot_pos[1],
@@ -182,7 +225,6 @@ def main():
             ec="orange",
         )
 
-        # PD制御による横修正ベクトル (緑)
         if abs(correction_speed) > 1.0:
             ax.arrow(
                 robot_pos[0],
@@ -197,7 +239,11 @@ def main():
 
         ax.set_xlim(robot_pos[0] - 150, robot_pos[0] + 150)
         ax.set_ylim(robot_pos[1] - 150, robot_pos[1] + 150)
-        ax.set_title(f"Spin + PD Control (Step: {step})\nKp={KP}, Kd={KD}")
+
+        status_text = f"Spin + PD Control (Step: {step})\nKp={KP}, Kd={KD}\n"
+        status_text += f"Lost Steps: {front_lost_steps}/{LOST_THRESHOLD_STEPS}"
+        ax.set_title(status_text)
+
         plt.grid(True)
         plt.pause(0.01)
 
