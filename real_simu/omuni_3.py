@@ -15,14 +15,14 @@ MAX_SPEED = 100.0
 MIN_SPEED = 40.0
 
 # 減速用のPIDゲイン（絶対ズレ量に対するPID）
-SPEED_KP = 0.05
+SPEED_KP = 0.03
 SPEED_KI = 0.0
-SPEED_KD = 0.02
+SPEED_KD = 0.01
 
 NUM_SENSORS = 6
 DT = 0.1
 COURSE_TYPE = 6
-SPIN_OMEGA = 3
+SPIN_OMEGA = 2.0
 
 # 追従制御用のPIDゲイン
 KP = 0.7
@@ -31,8 +31,8 @@ KI = 0.12
 I_THRESHOLD = LINE_WIDTH * 0
 
 HEADING_BLEND = 0.249
-LOST_THRESHOLD_STEPS = int((math.pi / 1) / (SPIN_OMEGA * DT))
-FORCE_LEFT_SPEED = math.radians(120.0)
+LOST_THRESHOLD_STEPS = int((math.pi / 1.0) / (SPIN_OMEGA * DT))
+FORCE_LEFT_SPEED = math.radians(100.0)
 
 # 外乱（ノイズ）の強さ (標準偏差)
 NOISE_STD = 20
